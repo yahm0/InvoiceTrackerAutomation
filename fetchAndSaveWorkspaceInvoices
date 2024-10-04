@@ -1,0 +1,198 @@
+// ==== Configuration ====
+
+const SPREADSHEET_ID = 'YOUR_SPREADSHEET_ID_HERE';
+const SHEET_NAME = 'YOUR_SHEET_NAME_HERE';
+const LABEL_NAME = 'YOUR_LABEL_NAME_HERE';
+const FOLDER_ID = 'YOUR_FOLDER_ID_HERE';
+const SENDER_EMAIL = 'YOUR_SENDER_EMAIL_HERE';
+const RECIPIENT_EMAIL = 'YOUR_RECIPIENT_EMAIL_HERE';
+
+function fetchAndSaveWorkspaceInvoices() {
+  try {
+    const label = GmailApp.getUserLabelByName(LABEL_NAME);
+    if (!label) {
+      Logger.log(`Label "${LABEL_NAME}" not found.`);
+      MailApp.sendEmail({
+        to: RECIPIENT_EMAIL,
+        subject: 'Workspace Invoices Automation Error',
+        body: `The Gmail label "${LABEL_NAME}" was not found. Please ensure it exists and is correctly named.`
+      });
+      return;
+    }
+    
+    const threads = label.getThreads();
+    Logger.log(`Found ${threads.length} threads with label "${LABEL_NAME}".`);
+    
+    if (threads.length === 0) {
+      Logger.log('No new invoices to process.');
+      return;
+    }
+    
+    const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const sheet = spreadsheet.getSheetByName(SHEET_NAME);
+    
+    if (!sheet) {
+      Logger.log(`Sheet "${SHEET_NAME}" not found.`);
+      MailApp.sendEmail({
+        to: RECIPIENT_EMAIL,
+        subject: 'Workspace Invoices Automation Error',
+        body: `The sheet "${SHEET_NAME}" was not found in the spreadsheet. Please ensure it exists and is correctly named.`
+      });
+      return;
+    }
+    
+    const folder = DriveApp.getFolderById(FOLDER_ID);
+    
+    threads.forEach(thread => {
+      const messages = thread.getMessages();
+      messages.forEach(message => {
+        if (message.isUnread() && message.getFrom().includes(SENDER_EMAIL)) {
+          try {
+            const subject = message.getSubject();
+            const date = message.getDate();
+            const body = message.getPlainBody();
+            
+            const invoiceId = extractInvoiceId(subject, body);
+            const billingAccount = extractBillingAccount(body);
+            const service = extractService(body);
+            const amount = extractAmount(body);
+            const currency = 'USD'; // Adjust if necessary
+            const description = extractDescription(body);
+            
+            // Save attachments and get their links
+            const receiptLink = saveAttachmentsToDrive(message, folder);
+            
+            // Extract text from PDF
+            const pdfText = extractTextFromPDF(message);
+            
+            if (!isInvoiceExists(sheet, invoiceId)) {
+              sheet.appendRow([invoiceId, date, billingAccount, service, amount, currency, description, receiptLink, pdfText]);
+              Logger.log(`Appended Invoice ID: ${invoiceId}`);
+            } else {
+              Logger.log(`Invoice ID ${invoiceId} already exists. Skipping.`);
+            }
+            
+            // Mark the message as read
+            message.markRead();
+          } catch (msgError) {
+            Logger.log(`Error processing message: ${msgError}`);
+            MailApp.sendEmail({
+              to: RECIPIENT_EMAIL,
+              subject: 'Workspace Invoices Automation Error',
+              body: `An error occurred while processing an invoice email:\n\n${msgError}`
+            });
+          }
+        }
+      });
+    });
+    
+    // Remove the label from processed threads to prevent reprocessing
+    label.removeFromThreads(threads);
+    Logger.log('Processed all relevant threads successfully.');
+    
+    // Optional: Send a success notification
+    MailApp.sendEmail({
+      to: RECIPIENT_EMAIL,
+      subject: 'Workspace Invoices Automation Success',
+      body: `Successfully processed ${threads.length} invoice threads on ${new Date()}.`
+    });
+    
+  } catch (error) {
+    Logger.log(`Error in fetchAndSaveWorkspaceInvoices: ${error}`);
+    MailApp.sendEmail({
+      to: RECIPIENT_EMAIL,
+      subject: 'Workspace Invoices Automation Critical Error',
+      body: `A critical error occurred while running the Workspace Invoices automation script:\n\n${error}`
+    });
+  }
+}
+
+// ==== Helper Functions ====
+
+function extractInvoiceId(subject, body) {
+  let match = subject.match(/Invoice ID:\s*(WS-\d+)/);
+  if (match && match[1]) return match[1];
+  
+  match = body.match(/Invoice ID:\s*(WS-\d+)/);
+  return match && match[1] ? match[1] : 'N/A';
+}
+
+function extractBillingAccount(body) {
+  const match = body.match(/Billing Account:\s*(ACCT-\d+)/);
+  return match && match[1] ? match[1] : 'N/A';
+}
+
+function extractService(body) {
+  const match = body.match(/Service:\s*([A-Za-z\s]+)/);
+  return match && match[1] ? match[1].trim() : 'N/A';
+}
+
+function extractAmount(body) {
+  const match = body.match(/Amount:\s*\$?([\d,]+\.\d{2})/);
+  if (match && match[1]) {
+    return parseFloat(match[1].replace(/,/g, ''));
+  }
+  return 0;
+}
+
+function extractDescription(body) {
+  const match = body.match(/Description:\s*(.*)/);
+  return match && match[1] ? match[1].trim() : '';
+}
+
+function saveAttachmentsToDrive(message, folder) {
+  const attachments = message.getAttachments();
+  if (attachments.length === 0) return '';
+  
+  let receiptLinks = [];
+  
+  attachments.forEach(attachment => {
+    const file = folder.createFile(attachment);
+    receiptLinks.push(file.getUrl());
+  });
+  
+  return receiptLinks.join(', ');
+}
+
+function isInvoiceExists(sheet, invoiceId) {
+  const data = sheet.getRange('A2:A' + sheet.getLastRow()).getValues();
+  return data.flat().includes(invoiceId);
+}
+
+// Function to extract text from PDF by converting it to Google Docs
+function extractTextFromPDF(message) {
+  const attachments = message.getAttachments();
+  if (attachments.length === 0) return '';
+  
+  let extractedText = '';
+  
+  attachments.forEach(attachment => {
+    if (attachment.getContentType() === 'application/pdf') {
+      // Create a temporary file in Drive
+      const tempFolder = DriveApp.createFolder('TempPDF');
+      const tempFile = tempFolder.createFile(attachment);
+      
+      // Convert PDF to Google Docs
+      const resource = {
+        title: attachment.getName(),
+        mimeType: MimeType.GOOGLE_DOCS
+      };
+      const options = {
+        convert: true
+      };
+      
+      const docFile = Drive.Files.insert(resource, tempFile.getBlob(), options);
+      const doc = DocumentApp.openById(docFile.id);
+      const text = doc.getBody().getText();
+      
+      extractedText += text;
+      
+      // Clean up: Delete temporary files and folder
+      tempFile.setTrashed(true);
+      docFile.setTrashed(true);
+      tempFolder.setTrashed(true);
+    }
+  });
+  
+  return extractedText;
+}
