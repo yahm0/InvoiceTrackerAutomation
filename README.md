@@ -1,70 +1,66 @@
-## Features
-- **Automated Gmail Integration**: Fetches emails with a specific label containing Google Workspace invoices.
-- **Invoice Parsing**: Extracts key details such as Invoice ID, Billing Account, Service, Amount, and Description.
-- **Google Sheet Integration**: Appends invoice details to a specified Google Sheet for easy tracking.
-- **Google Drive Integration**: Saves invoice attachments to a specified folder on Google Drive.
-- **PDF Extraction**: Converts PDF invoices to Google Docs for text extraction, allowing for additional information parsing.
-- **Notifications**: Sends success or error notifications via email.
+# InvoiceTrackerAutomation
 
-## Prerequisites
-- A Google Workspace account with invoices labeled appropriately.
-- A Google Sheet to store invoice details.
-- A Google Drive folder to store invoice attachments.
-- Permission to run Google Apps Script, including access to Gmail, Google Drive, and Google Sheets.
+InvoiceTrackerAutomation is a Google Apps Script designed to automate the retrieval, extraction, and logging of Google Workspace invoices from Gmail to Google Sheets, with invoice attachments saved to Google Drive. This script helps centralize invoice management, reducing the need for manual data entry.
+
+## Features
+- **Automated Gmail Integration**: Fetches Gmail messages with a specific label containing Workspace invoices.
+- **Invoice Data Extraction**: Extracts invoice details such as Invoice ID, Billing Account, Service, Amount, and Description.
+- **Google Sheets Integration**: Logs invoice data into a Google Sheet for easy tracking and management.
+- **Google Drive Integration**: Saves invoice attachments to a designated Google Drive folder.
+- **PDF Text Extraction**: Converts attached PDFs to Google Docs for extracting relevant text information.
+- **Notification System**: Sends email notifications for success or error scenarios.
 
 ## Setup Instructions
-1. **Clone or Copy the Script**:
-   - Copy the code from the repository into your Google Apps Script Editor (https://script.google.com).
-2. **Configuration**:
-   - Update the following constants in the script with your own information:
-     - `SPREADSHEET_ID`: Google Sheet ID where the invoice details will be saved.
-     - `SHEET_NAME`: Name of the specific sheet inside the spreadsheet.
-     - `LABEL_NAME`: Gmail label name used to filter the invoice emails.
-     - `FOLDER_ID`: Google Drive folder ID where the attachments will be saved.
-     - `SENDER_EMAIL`: The email address that sends the invoices (e.g., `payments-noreply@google.com`).
-     - `RECIPIENT_EMAIL`: Your email address for notifications.
-3. **Grant Permissions**:
-   - Run the script for the first time and follow the prompts to grant necessary permissions.
-4. **Test the Script**:
-   - Add the appropriate Gmail label to some sample invoice emails and run the script manually to ensure everything works.
-5. **Automation**:
-   - Set up a trigger in Google Apps Script to run `fetchAndSaveWorkspaceInvoices` automatically at a regular interval (e.g., once a day).
+
+### Prerequisites
+- **Google Account** with access to Gmail, Google Sheets, and Google Drive.
+- **Google Apps Script Editor**: Access via [script.google.com](https://script.google.com).
+- **Google Drive API Enabled**: Enable the Drive API in both Google Apps Script and the Google Cloud Console.
+
+### Configuration
+1. **Copy the Script**: Copy the provided code into the Google Apps Script Editor.
+2. **Replace Configuration Variables**:
+   - `SPREADSHEET_ID`: Replace with the ID of your Google Sheet where invoice details will be stored.
+   - `SHEET_NAME`: Replace with the name of the specific sheet where data should be saved.
+   - `LABEL_NAME`: Replace with the label used in Gmail for Workspace invoices.
+   - `FOLDER_ID`: Replace with the Google Drive folder ID where attachments will be stored.
+   - `SENDER_EMAIL`: Replace with the email address of the sender of invoices (e.g., `payments-noreply@google.com`).
+   - `RECIPIENT_EMAIL`: Replace with your email address to receive error/success notifications.
+3. **Enable Advanced Google Services**:
+   - Navigate to `Extensions` > `Apps Script` > `Services` > Enable **Drive API**.
+
+### Running the Script
+1. **Authorization**: Run the script for the first time and authorize the required permissions.
+2. **Execution**: Run the `fetchAndSaveWorkspaceInvoices()` function manually or set up a time-based trigger to run it periodically.
+
+### Automation
+- Set up a time-based trigger (e.g., daily or weekly) to run the script automatically and keep your records updated.
 
 ## Usage
-The script automatically scans your Gmail inbox for emails with the specified label (`Workspace Invoices`), extracts invoice details, and logs them into the specified Google Sheet. The attachments are saved in a designated Google Drive folder, and if a PDF is attached, it will also extract text from the PDF for additional processing.
+The script automatically scans Gmail for invoices based on the label specified in `LABEL_NAME`, extracts details, and appends them to your Google Sheet. Attachments are saved to the specified Google Drive folder. The script converts PDFs to Google Docs for text extraction and stores the extracted information.
 
 ### Example Workflow
-1. An invoice email is received in Gmail.
-2. The email is automatically labeled (or manually labeled) with `Workspace Invoices`.
-3. The script fetches emails with the label, extracts relevant information, and logs it into Google Sheets.
-4. Attachments are saved to Google Drive, and PDFs are converted to Google Docs for text extraction.
-5. The script sends a success notification when the process is complete.
+1. **Invoice Received**: An invoice email arrives in Gmail and is automatically labeled (e.g., "Workspace Invoices").
+2. **Script Execution**: The script retrieves the email, extracts invoice details, and saves them to Google Sheets.
+3. **Attachment Saved**: Attachments (like receipts or PDFs) are saved to Google Drive.
+4. **Notification**: A success or error notification is sent to the configured recipient.
 
 ## Error Handling
-- If a Gmail label or sheet is not found, the script sends an error email to `RECIPIENT_EMAIL`.
-- If an error occurs during message processing, the script logs the error and sends an email notification.
-
-## Tech Stack
-- **Google Apps Script** for automation.
-- **Google Sheets** for data storage.
-- **Google Drive** for attachment storage.
+- **Label Not Found**: Sends an error notification if the Gmail label does not exist.
+- **Sheet Not Found**: Sends an error notification if the specified sheet cannot be found in the Google Spreadsheet.
+- **PDF Extraction Issues**: Logs any issues related to PDF text extraction and sends notifications for critical errors.
 
 ## Future Enhancements
-- **Error Recovery**: Add more robust retry mechanisms for transient errors.
-- **Detailed Logging**: Store logs in Google Sheets for easier monitoring.
-- **Extended Support**: Expand parsing capabilities to handle more complex invoice formats.
+- **Improved OCR**: Integrate Google Cloud Vision API for improved OCR capabilities on scanned PDF invoices.
+- **Enhanced Error Handling**: Add retry logic for transient errors.
+- **Logging Enhancements**: Store logs in Google Sheets for better tracking of processed invoices.
 
 ## License
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
 
 ## Contributions
-Contributions are welcome! Feel free to open an issue or submit a pull request if you have suggestions or improvements.
+Contributions are welcome! If you have any suggestions or improvements, feel free to open an issue or submit a pull request.
 
 ## Contact
-For questions or support, please email [anuccio@terminalsoftware.gg](mailto:anuccio@terminalsoftware.gg).
+For questions or support, please open an issue on the repository or contact the repository owner.
 
----
-
-### Notes
-- This script will require permissions to access Gmail, Google Drive, and Google Sheets. Ensure that the permissions are only granted if you trust the script.
-- Always test with sample data before using it in a production environment to avoid data loss or unauthorized access.
