@@ -1,21 +1,22 @@
-// ==== Configuration ====
+/// ==== Configuration ====
 
-const SPREADSHEET_ID = 'YOUR_SPREADSHEET_ID_HERE';
-const SHEET_NAME = 'YOUR_SHEET_NAME_HERE';
-const LABEL_NAME = 'YOUR_LABEL_NAME_HERE';
-const FOLDER_ID = 'YOUR_FOLDER_ID_HERE';
-const SENDER_EMAIL = 'your-sender-email@domain.com';
-const RECIPIENT_EMAIL = 'your-recipient-email@domain.com';
+const SPREADSHEET_ID = 'YOUR_SPREADSHEET_ID_HERE'; // Replace with your Google Sheet ID
+const SHEET_NAME = 'Workspace Invoices Tracker'; // Replace with your sheet name
+const LABEL_NAME = 'Workspace Invoices'; // Replace with your Gmail label name
+const FOLDER_ID = 'YOUR_GOOGLE_DRIVE_FOLDER_ID_HERE'; // Replace with your Google Drive folder ID
+const SENDER_EMAIL = 'payments-noreply@google.com'; // Replace with the sender's email address
+const RECIPIENT_EMAIL = 'YOUR_EMAIL_ADDRESS_HERE'; // Replace with your email for notifications
 
-// Ensure that the Advanced Drive API is enabled:
-// 1. In the Apps Script editor, click on "Services" (+ icon).
-// 2. Add "Drive API" from the list.
+// **Date Range Configuration**
+const ONE_YEAR_AGO = new Date();
+ONE_YEAR_AGO.setFullYear(ONE_YEAR_AGO.getFullYear() - 1);
+
+// ==== Main Function ====
 
 function fetchAndSaveWorkspaceInvoices() {
   try {
     const label = GmailApp.getUserLabelByName(LABEL_NAME);
     if (!label) {
-      // Corrected to use backticks for template literals
       Logger.log(`Label "${LABEL_NAME}" not found.`);
       MailApp.sendEmail({
         to: RECIPIENT_EMAIL,
@@ -25,12 +26,14 @@ function fetchAndSaveWorkspaceInvoices() {
       return;
     }
 
+    Logger.log(`Label "${LABEL_NAME}" found.`);
+
+    // Fetch all threads with the specified label
     const threads = label.getThreads();
-    // Corrected to use backticks for template literals
     Logger.log(`Found ${threads.length} threads with label "${LABEL_NAME}".`);
 
     if (threads.length === 0) {
-      Logger.log('No new invoices to process.');
+      Logger.log('No invoices to process.');
       return;
     }
 
@@ -38,7 +41,6 @@ function fetchAndSaveWorkspaceInvoices() {
     const sheet = spreadsheet.getSheetByName(SHEET_NAME);
 
     if (!sheet) {
-      // Corrected to use backticks for template literals
       Logger.log(`Sheet "${SHEET_NAME}" not found.`);
       MailApp.sendEmail({
         to: RECIPIENT_EMAIL,
@@ -48,83 +50,127 @@ function fetchAndSaveWorkspaceInvoices() {
       return;
     }
 
+    Logger.log(`Spreadsheet and sheet "${SHEET_NAME}" accessed successfully.`);
+
     const folder = DriveApp.getFolderById(FOLDER_ID);
+    Logger.log(`Drive folder with ID "${FOLDER_ID}" accessed successfully.`);
 
-    threads.forEach((thread) => {
+    threads.forEach((thread, threadIndex) => {
+      Logger.log(`Processing thread ${threadIndex + 1}/${threads.length}`);
+
       const messages = thread.getMessages();
-      messages.forEach((message) => {
-        // Corrected condition to check if the sender email matches exactly
-        if (
-          message.isUnread() &&
-          message.getFrom().replace(/.*<(.+)>/, '$1') === SENDER_EMAIL
-        ) {
-          try {
-            const subject = message.getSubject();
-            const date = message.getDate();
-            const body = message.getPlainBody();
+      const latestMessage = messages[messages.length - 1];
+      const messageDate = latestMessage.getDate();
 
-            const invoiceId = extractInvoiceId(subject, body);
-            const billingAccount = extractBillingAccount(body);
-            const service = extractService(body);
-            const amount = extractAmount(body);
-            const currency = 'USD'; // Adjust if necessary
-            const description = extractDescription(body);
+      // **Date-Based Filtering: Process Only Emails from the Last Year**
+      if (messageDate >= ONE_YEAR_AGO) {
+        Logger.log(`  Thread Date: ${messageDate} is within the last year. Processing...`);
 
-            // Save attachments and get their links
-            const receiptLink = saveAttachmentsToDrive(message, folder);
+        messages.forEach((message, messageIndex) => {
+          Logger.log(`    Processing message ${messageIndex + 1}/${messages.length} in thread.`);
 
-            // Extract text from PDF
-            const pdfText = extractTextFromPDF(message);
+          // **Check if the Sender Matches**
+          const senderEmail = extractEmailAddress(message.getFrom());
+          if (senderEmail === SENDER_EMAIL) {
+            Logger.log(`      Message from sender "${SENDER_EMAIL}" found.`);
 
-            // Optionally, parse additional details from pdfText if needed
-            // For example, extract more fields using regex or other parsing methods
+            try {
+              const subject = message.getSubject();
+              const date = message.getDate();
+              const body = message.getPlainBody();
 
-            if (!isInvoiceExists(sheet, invoiceId)) {
-              sheet.appendRow([
-                invoiceId,
-                date,
-                billingAccount,
-                service,
-                amount,
-                currency,
-                description,
-                receiptLink,
-                pdfText,
-              ]);
-              // Corrected to use backticks for template literals
-              Logger.log(`Appended Invoice ID: ${invoiceId}`);
-            } else {
-              // Corrected to use backticks for template literals
-              Logger.log(`Invoice ID ${invoiceId} already exists. Skipping.`);
+              // **Log Subject and Body for Debugging**
+              Logger.log(`        Subject: ${subject}`);
+              Logger.log(`        Body: ${body.substring(0, 500)}...`); // Log first 500 characters for brevity
+
+              const invoiceNumber = extractInvoiceNumber(body);
+              const paymentsProfileId = extractPaymentsProfileId(body);
+              const service = extractService(body);
+              
+              // **Extract Amount from Body**
+              const amountFromBody = extractAmount(body);
+              Logger.log(`        Amount extracted from body: ${amountFromBody}`);
+              
+              // **Extract Text from PDF Attachments**
+              const pdfText = extractTextFromPDF(message);
+              Logger.log(`        Extracted PDF Text: ${pdfText.substring(0, 100)}...`); // Log first 100 characters
+
+              // **Extract Amount from PDF Text**
+              const amountFromPDF = extractAmountFromPDF(pdfText);
+              Logger.log(`        Amount extracted from PDF: ${amountFromPDF}`);
+
+              // **Choose which amount to use**
+              const amount = amountFromBody !== 0 ? amountFromBody : amountFromPDF;
+              Logger.log(`        Final Amount to use: ${amount}`);
+
+              const currency = 'USD'; // Adjust if necessary
+              const description = extractDescription(body);
+
+              Logger.log(`        Extracted Data - Invoice Number: ${invoiceNumber}, Payments Profile ID: ${paymentsProfileId}, Service: ${service}, Amount: ${amount}, Description: ${description}`);
+
+              // **Skip Processing if Invoice Number is Not Found**
+              if (invoiceNumber === 'N/A') {
+                Logger.log(`        Invoice Number not found. Skipping this message.`);
+                return;
+              }
+
+              // **Check for Duplicate Invoice Numbers**
+              if (!isInvoiceExists(sheet, invoiceNumber)) {
+                // **Save Attachments and Get Their Links**
+                const receiptLink = saveAttachmentsToDrive(message, folder);
+                Logger.log(`        Saved attachments: ${receiptLink}`);
+
+                // **Append Data to Spreadsheet**
+                sheet.appendRow([
+                  invoiceNumber,
+                  date,
+                  paymentsProfileId,
+                  service,
+                  amount,
+                  currency,
+                  description,
+                  receiptLink,
+                  pdfText,
+                ]);
+                Logger.log(`        Appended Invoice Number: ${invoiceNumber} to the sheet.`);
+
+                // **Optional: Mark Message as Read and Remove Label**
+                // Uncomment the following lines once testing is complete
+                // message.markRead();
+                // label.removeFromThreads([thread]);
+              } else {
+                Logger.log(`        Invoice Number ${invoiceNumber} already exists. Skipping.`);
+              }
+            } catch (msgError) {
+              Logger.log(`        Error processing message: ${msgError}`);
+              MailApp.sendEmail({
+                to: RECIPIENT_EMAIL,
+                subject: 'Workspace Invoices Automation Error',
+                body: `An error occurred while processing an invoice email:\n\n${msgError}`,
+              });
             }
-
-            // Mark the message as read
-            message.markRead();
-          } catch (msgError) {
-            // Corrected to use backticks for template literals
-            Logger.log(`Error processing message: ${msgError}`);
-            MailApp.sendEmail({
-              to: RECIPIENT_EMAIL,
-              subject: 'Workspace Invoices Automation Error',
-              body: `An error occurred while processing an invoice email:\n\n${msgError}`,
-            });
+          } else {
+            Logger.log(`      Message from "${senderEmail}" does not match sender email. Skipping.`);
           }
-        }
-      });
+        });
+      } else {
+        Logger.log(`  Thread Date: ${messageDate} is older than one year. Skipping.`);
+      }
     });
 
-    // Remove the label from processed threads to prevent reprocessing
-    label.removeFromThreads(threads);
     Logger.log('Processed all relevant threads successfully.');
 
-    // Optional: Send a success notification
+    // **Optional: Remove Label from Processed Threads**
+    // Uncomment the following line once testing is complete
+    // label.removeFromThreads(threads);
+
+    // **Send a Success Notification**
     MailApp.sendEmail({
       to: RECIPIENT_EMAIL,
       subject: 'Workspace Invoices Automation Success',
       body: `Successfully processed ${threads.length} invoice threads on ${new Date()}.`,
     });
   } catch (error) {
-    // Corrected to use backticks for template literals
     Logger.log(`Error in fetchAndSaveWorkspaceInvoices: ${error}`);
     MailApp.sendEmail({
       to: RECIPIENT_EMAIL,
@@ -136,115 +182,30 @@ function fetchAndSaveWorkspaceInvoices() {
 
 // ==== Helper Functions ====
 
-function extractInvoiceId(subject, body) {
-  let match = subject.match(/Invoice ID:\s*(WS-\d+)/);
-  if (match && match[1]) return match[1];
+// **Extract Email Address from 'From' Field**
+function extractEmailAddress(fromField) {
+  const emailRegex = /<(.+)>/;
+  const match = fromField.match(emailRegex);
+  return match && match[1] ? match[1] : fromField;
+}
 
-  match = body.match(/Invoice ID:\s*(WS-\d+)/);
+// **Extract Invoice Number**
+function extractInvoiceNumber(body) {
+  // Look for "Invoice number <number>"
+  const match = body.match(/Invoice\s*number\s*[:\-]?\s*(\d+)/i);
   return match && match[1] ? match[1] : 'N/A';
 }
 
-function extractBillingAccount(body) {
-  const match = body.match(/Billing Account:\s*(ACCT-\d+)/);
+// **Extract Payments Profile ID**
+function extractPaymentsProfileId(body) {
+  // Look for "Payments profile ID <ID>"
+  const match = body.match(/Payments\s*profile\s*ID\s*[:\-]?\s*([\d\-]+)/i);
   return match && match[1] ? match[1] : 'N/A';
 }
 
+// **Extract Service**
 function extractService(body) {
-  const match = body.match(/Service:\s*([A-Za-z\s]+)/);
-  return match && match[1] ? match[1].trim() : 'N/A';
-}
-
-function extractAmount(body) {
-  const match = body.match(/Amount:\s*\$?([\d,]+\.\d{2})/);
-  if (match && match[1]) {
-    return parseFloat(match[1].replace(/,/g, ''));
-  }
-  return 0;
-}
-
-function extractDescription(body) {
-  const match = body.match(/Description:\s*(.*)/);
-  return match && match[1] ? match[1].trim() : '';
-}
-
-function saveAttachmentsToDrive(message, folder) {
-  const attachments = message.getAttachments();
-  if (attachments.length === 0) return '';
-
-  let receiptLinks = [];
-
-  attachments.forEach((attachment) => {
-    // Enhanced MIME type checking
-    const mimeType = attachment.getContentType();
-    if (
-      mimeType === 'application/pdf' ||
-      mimeType === 'image/png' ||
-      mimeType === 'image/jpeg' ||
-      mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' // Add other MIME types as needed
-    ) {
-      const file = folder.createFile(attachment);
-      receiptLinks.push(file.getUrl());
-      Logger.log(`Saved attachment: ${attachment.getName()}`);
-    } else {
-      Logger.log(
-        `Skipped unsupported attachment type: ${attachment.getName()} (${mimeType})`
-      );
-    }
-  });
-
-  return receiptLinks.join(', ');
-}
-
-function isInvoiceExists(sheet, invoiceId) {
-  const data = sheet.getRange('A2:A' + sheet.getLastRow()).getValues();
-  return data.flat().includes(invoiceId);
-}
-
-// Function to extract text from PDF by converting it to Google Docs
-function extractTextFromPDF(message) {
-  const attachments = message.getAttachments();
-  if (attachments.length === 0) return '';
-
-  let extractedText = '';
-
-  attachments.forEach((attachment) => {
-    if (attachment.getContentType() === 'application/pdf') {
-      try {
-        // Create a temporary folder if not already created
-        let tempFolder;
-        const existingFolders = DriveApp.getFoldersByName('TempPDF');
-        if (existingFolders.hasNext()) {
-          tempFolder = existingFolders.next();
-        } else {
-          tempFolder = DriveApp.createFolder('TempPDF');
-        }
-
-        const tempFile = tempFolder.createFile(attachment);
-
-        // Convert PDF to Google Docs
-        const resource = {
-          title: attachment.getName(),
-          mimeType: MimeType.GOOGLE_DOCS,
-        };
-        const options = {
-          convert: true,
-        };
-
-        const docFile = Drive.Files.insert(resource, tempFile.getBlob(), options);
-        const doc = DocumentApp.openById(docFile.id);
-        const text = doc.getBody().getText();
-
-        extractedText += text + '\n'; // Append with a newline for separation
-
-        // Clean up: Delete temporary files (move to trash)
-        tempFile.setTrashed(true);
-        DriveApp.getFileById(docFile.id).setTrashed(true);
-      } catch (pdfError) {
-        Logger.log(`Error extracting text from PDF: ${pdfError}`);
-        // Optionally, notify via email or handle the error as needed
-      }
-    }
-  });
-
-  return extractedText.trim();
-}
+  // Assuming service details are provided, adjust as necessary
+  // Example: Service: Premium Subscription
+  const match = body.match(/Service\s*[:\-]?\s*([\w\s]+)/i);
+  return mat
