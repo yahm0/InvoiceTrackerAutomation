@@ -51,7 +51,7 @@ Key settings:
 - Logs go to a dedicated "Logs" sheet tab via `log_()` and `flushLogs_()`
 - All Drive/Gmail calls wrapped in `withRetry_()` for exponential backoff
 - Duplicate detection uses both invoice number and Gmail message ID (Set-based O(1) lookups)
-- Column positions managed via `COLUMNS` object  - never use magic index numbers
+- Column positions managed via `COLUMNS` object (never use magic index numbers)
 - Sheet auto-creates with headers if missing (`getOrCreateMainSheet_()`)
 - Execution time guard with checkpoint/resume prevents Apps Script timeout
 - Temp files cleaned up in `finally` blocks to prevent Drive leaks
