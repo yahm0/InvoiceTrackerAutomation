@@ -59,6 +59,34 @@
 
 - Set up a time-based trigger (e.g., daily or weekly) to run the script automatically and keep your records updated.
 
+### clasp Setup (Local Development)
+
+[clasp](https://github.com/google/clasp) allows you to develop and deploy Google Apps Script projects from the command line.
+
+1. **Install clasp:**
+   ```bash
+   npm install -g @google/clasp
+   ```
+2. **Login:**
+   ```bash
+   clasp login
+   ```
+3. **Copy the config template:**
+   ```bash
+   cp .clasp.json.example .clasp.json
+   ```
+4. **Set your Script ID:** Open your Apps Script project, go to **Project Settings**, copy the Script ID, and replace `YOUR_SCRIPT_ID_HERE` in `.clasp.json`.
+5. **Push changes:**
+   ```bash
+   clasp push
+   ```
+6. **Pull changes:**
+   ```bash
+   clasp pull
+   ```
+
+> **Note:** `.clasp.json` is gitignored to prevent leaking your Script ID.
+
 ### Debug Mode
 
 Set `DEBUG = true` in the configuration section to enable verbose logging and Gmail label listing. This is useful for initial setup and troubleshooting.
@@ -83,7 +111,7 @@ The script automatically scans Gmail for invoices based on the label specified i
 | C | Payments Profile ID | Billing profile identifier |
 | D | Service | Service description |
 | E | Amount | Invoice amount |
-| F | Currency | Currency type (USD) |
+| F | Currency | Auto-detected currency code (e.g., USD, EUR, GBP) |
 | G | Description | Invoice description |
 | H | Receipt Link | Google Drive file URL(s) |
 | I | PDF Text | Extracted text from PDF attachments |
@@ -91,12 +119,14 @@ The script automatically scans Gmail for invoices based on the label specified i
 
 ## Error Handling
 
+- **Automatic Retry:** Transient errors (rate limits, timeouts, 5xx) are retried up to 3 times with exponential backoff.
 - **Configuration Validation:** Throws a clear error if required config values are still set to placeholders.
 - **Label Not Found:** Sends an error notification if the Gmail label does not exist.
 - **Sheet Not Found:** Sends an error notification if the specified sheet cannot be found in the Google Spreadsheet.
 - **Duplicate Entries:** Checks for duplicate invoice numbers and message IDs to prevent reprocessing.
 - **PDF Extraction Issues:** Logs any issues related to PDF text extraction.
 - **Error Summary:** All errors during processing are collected and sent in a single notification email.
+- **Persistent Logs:** All log entries are written to a "Logs" sheet for post-run analysis and audit trails.
 
 ## Project Structure
 
@@ -104,18 +134,22 @@ The script automatically scans Gmail for invoices based on the label specified i
 InvoiceTrackerAutomation/
 ├── fetchAndSaveWorkspaceInvoices.gs   # Main Google Apps Script
 ├── appsscript.json                     # Project manifest (scopes, services, runtime)
+├── .clasp.json.example                 # clasp config template (copy to .clasp.json)
 ├── .gitignore                          # Git ignore rules
 ├── LICENSE                             # MIT License
 └── README.md                           # This file
 ```
 
+## Features Added
+
+- **Retry Logic:** Automatic exponential backoff retry for transient API errors (rate limits, timeouts, 5xx).
+- **Persistent Logging:** Structured logs written to a "Logs" sheet with auto-trimming (timestamp, level, function, message).
+- **Currency Detection:** Auto-detects currency from invoice content (supports USD, EUR, GBP, JPY, and more).
+- **clasp Integration:** `.clasp.json.example` template for local development and CI/CD deployment.
+
 ## Future Enhancements
 
 - **Improved OCR:** Integrate Google Cloud Vision API for improved OCR capabilities on scanned PDF invoices.
-- **Enhanced Error Handling:** Add retry logic for transient errors.
-- **Logging Enhancements:** Store logs in Google Sheets for better tracking of processed invoices.
-- **Currency Detection:** Auto-detect currency from invoice content instead of hardcoding USD.
-- **clasp Integration:** Add `.clasp.json` configuration for local development and CI/CD deployment.
 
 ## License
 

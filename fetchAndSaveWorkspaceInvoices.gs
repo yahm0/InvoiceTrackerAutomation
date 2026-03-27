@@ -16,6 +16,28 @@ const DEBUG = false;
 // Maximum threads per batch (Gmail API limit is 500)
 const THREAD_BATCH_SIZE = 100;
 
+// Maximum retry attempts for transient API errors
+const MAX_RETRIES = 3;
+
+// Logging configuration
+const LOG_SHEET_NAME = 'Logs';
+const MAX_LOG_ENTRIES = 1000;
+
+// Default currency fallback when auto-detection fails
+const DEFAULT_CURRENCY = 'USD';
+
+// Currency symbol to ISO 4217 code mapping
+const CURRENCY_SYMBOLS = {
+  '$': 'USD',
+  '\u20AC': 'EUR',
+  '\u00A3': 'GBP',
+  '\u00A5': 'JPY',
+  '\u20B9': 'INR'
+};
+
+// ISO 4217 currency code detection pattern
+const CURRENCY_CODE_PATTERN = /\b(USD|EUR|GBP|JPY|CAD|AUD|INR|CHF|NZD|SEK|NOK|DKK|BRL|MXN|KRW|SGD|HKD)\b/i;
+
 // Supported attachment MIME types
 const SUPPORTED_MIME_TYPES = [
   'application/pdf',
@@ -24,14 +46,108 @@ const SUPPORTED_MIME_TYPES = [
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 ];
 
-// Amount extraction regex patterns (shared between body and PDF extraction)
+// Amount extraction regex patterns (currency-agnostic)
 const AMOUNT_PATTERNS = [
-  /Total\s+in\s+USD[\s\S]*?\$?([\d,]+\.\d{2})/i,
-  /Amount\s*[:\-]?\s*\$?([\d,]+\.\d{2})/i,
-  /Total\s*[:\-]?\s*\$?([\d,]+\.\d{2})/i,
-  /Amount\s*Due\s*[:\-]?\s*USD\s*([\d,]+\.\d{2})/i,
-  /Balance\s*[:\-]?\s*\$?([\d,]+\.\d{2})/i
+  /Total\s+in\s+\w{3}[\s\S]*?[$\u20AC\u00A3\u00A5\u20B9]?\s*([\d,]+\.\d{2})/i,
+  /Amount\s*[:\-]?\s*[$\u20AC\u00A3\u00A5\u20B9]?\s*([\d,]+\.\d{2})/i,
+  /Total\s*[:\-]?\s*[$\u20AC\u00A3\u00A5\u20B9]?\s*([\d,]+\.\d{2})/i,
+  /Amount\s*Due\s*[:\-]?\s*\w{0,3}\s*([\d,]+\.\d{2})/i,
+  /Balance\s*[:\-]?\s*[$\u20AC\u00A3\u00A5\u20B9]?\s*([\d,]+\.\d{2})/i
 ];
+
+// Script-scoped log buffer (flushed to Logs sheet at end of run)
+var logBuffer_ = [];
+
+// ==== Retry Logic ====
+
+/**
+ * Executes a function with exponential backoff retry for transient errors.
+ * @param {string} operationName - Name for logging (e.g., 'GmailApp.getUserLabelByName').
+ * @param {Function} fn - The function to execute.
+ * @return {*} The return value of fn.
+ * @throws {Error} If all retries are exhausted or a permanent error occurs.
+ */
+function withRetry_(operationName, fn) {
+  for (var attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      return fn();
+    } catch (error) {
+      if (!isTransientError_(error) || attempt === MAX_RETRIES) {
+        if (attempt > 0) {
+          log_('ERROR', 'withRetry_', operationName + ' failed after ' + (attempt + 1) + ' attempts: ' + error);
+        }
+        throw error;
+      }
+      var waitMs = Math.pow(2, attempt) * 1000;
+      log_('WARN', 'withRetry_', operationName + ' failed (attempt ' + (attempt + 1) + '/' + (MAX_RETRIES + 1) + '). Retrying in ' + waitMs + 'ms. Error: ' + error);
+      Utilities.sleep(waitMs);
+    }
+  }
+}
+
+/**
+ * Determines if an error is transient and worth retrying.
+ * @param {Error} error - The caught error.
+ * @return {boolean} True if the error is transient.
+ */
+function isTransientError_(error) {
+  var message = String(error.message || error);
+  return /Service invoked too many times|Limit Exceeded|Rate Limit|Timeout|timed out|502|503|500|UNAVAILABLE|temporarily unavailable|Service error/i.test(message);
+}
+
+// ==== Logging ====
+
+/**
+ * Logs a message to the in-memory buffer and Logger.log.
+ * Buffer is flushed to the Logs sheet at end of run via flushLogs_().
+ * @param {string} level - Log level: 'INFO', 'WARN', or 'ERROR'.
+ * @param {string} functionName - The function where the log originated.
+ * @param {string} message - The log message.
+ */
+function log_(level, functionName, message) {
+  logBuffer_.push([new Date(), level, functionName, message]);
+  Logger.log(level + ' [' + functionName + '] ' + message);
+}
+
+/**
+ * Batch writes all buffered log entries to the Logs sheet and trims old entries.
+ * @param {Spreadsheet} spreadsheet - The Google Spreadsheet object.
+ */
+function flushLogs_(spreadsheet) {
+  if (logBuffer_.length === 0) return;
+
+  try {
+    var logSheet = getOrCreateLogSheet_(spreadsheet);
+    var lastRow = logSheet.getLastRow();
+    logSheet.getRange(lastRow + 1, 1, logBuffer_.length, 4).setValues(logBuffer_);
+
+    // Trim old entries if over MAX_LOG_ENTRIES (row 1 is header)
+    var totalRows = logSheet.getLastRow();
+    var excess = totalRows - 1 - MAX_LOG_ENTRIES;
+    if (excess > 0) {
+      logSheet.deleteRows(2, excess);
+    }
+
+    logBuffer_ = [];
+  } catch (logError) {
+    Logger.log('ERROR [flushLogs_] Failed to write logs to sheet: ' + logError);
+  }
+}
+
+/**
+ * Gets or creates the Logs sheet with headers.
+ * @param {Spreadsheet} spreadsheet - The Google Spreadsheet object.
+ * @return {Sheet} The Logs sheet.
+ */
+function getOrCreateLogSheet_(spreadsheet) {
+  var logSheet = spreadsheet.getSheetByName(LOG_SHEET_NAME);
+  if (!logSheet) {
+    logSheet = spreadsheet.insertSheet(LOG_SHEET_NAME);
+    logSheet.appendRow(['Timestamp', 'Level', 'Function', 'Message']);
+    logSheet.setFrozenRows(1);
+  }
+  return logSheet;
+}
 
 // ==== Main Function ====
 
@@ -40,6 +156,8 @@ const AMOUNT_PATTERNS = [
  * saves attachments to Drive, and logs everything to a Google Sheet.
  */
 function fetchAndSaveWorkspaceInvoices() {
+  var spreadsheet = null;
+
   try {
     validateConfig_();
 
@@ -47,81 +165,88 @@ function fetchAndSaveWorkspaceInvoices() {
       listAllLabels_();
     }
 
-    const label = GmailApp.getUserLabelByName(LABEL_NAME);
+    var label = withRetry_('GmailApp.getUserLabelByName', function() {
+      return GmailApp.getUserLabelByName(LABEL_NAME);
+    });
+
     if (!label) {
-      Logger.log('Label "' + LABEL_NAME + '" not found.');
+      log_('ERROR', 'fetchAndSaveWorkspaceInvoices', 'Label "' + LABEL_NAME + '" not found.');
       sendNotification_('Error', 'The Gmail label "' + LABEL_NAME + '" was not found. Please ensure it exists and is correctly named.');
       return;
     }
 
-    Logger.log('Label "' + LABEL_NAME + '" found.');
+    log_('INFO', 'fetchAndSaveWorkspaceInvoices', 'Label "' + LABEL_NAME + '" found.');
 
     // Fetch threads with pagination to handle large mailboxes
-    const allThreads = fetchAllThreads_(label);
-    Logger.log('Found ' + allThreads.length + ' threads with label "' + LABEL_NAME + '".');
+    var allThreads = fetchAllThreads_(label);
+    log_('INFO', 'fetchAndSaveWorkspaceInvoices', 'Found ' + allThreads.length + ' threads with label "' + LABEL_NAME + '".');
 
     if (allThreads.length === 0) {
-      Logger.log('No invoices to process.');
+      log_('INFO', 'fetchAndSaveWorkspaceInvoices', 'No invoices to process.');
       return;
     }
 
-    const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const sheet = spreadsheet.getSheetByName(SHEET_NAME);
+    spreadsheet = withRetry_('SpreadsheetApp.openById', function() {
+      return SpreadsheetApp.openById(SPREADSHEET_ID);
+    });
+    var sheet = spreadsheet.getSheetByName(SHEET_NAME);
 
     if (!sheet) {
-      Logger.log('Sheet "' + SHEET_NAME + '" not found.');
+      log_('ERROR', 'fetchAndSaveWorkspaceInvoices', 'Sheet "' + SHEET_NAME + '" not found.');
       sendNotification_('Error', 'The sheet "' + SHEET_NAME + '" was not found in the spreadsheet. Please ensure it exists and is correctly named.');
       return;
     }
 
-    Logger.log('Spreadsheet and sheet "' + SHEET_NAME + '" accessed successfully.');
+    log_('INFO', 'fetchAndSaveWorkspaceInvoices', 'Spreadsheet and sheet "' + SHEET_NAME + '" accessed successfully.');
 
-    const folder = DriveApp.getFolderById(FOLDER_ID);
-    Logger.log('Drive folder accessed successfully.');
+    var folder = withRetry_('DriveApp.getFolderById', function() {
+      return DriveApp.getFolderById(FOLDER_ID);
+    });
+    log_('INFO', 'fetchAndSaveWorkspaceInvoices', 'Drive folder accessed successfully.');
 
     // Best practice: read existing data ONCE before the loop to minimize service calls
-    const existingData = loadExistingData_(sheet);
-    Logger.log('Loaded ' + existingData.invoiceNumbers.length + ' existing invoice records for duplicate checking.');
+    var existingData = loadExistingData_(sheet);
+    log_('INFO', 'fetchAndSaveWorkspaceInvoices', 'Loaded ' + existingData.invoiceNumbers.length + ' existing invoice records for duplicate checking.');
 
     // Collect new rows for batch write
-    const newRows = [];
-    const errors = [];
-    let processedCount = 0;
+    var newRows = [];
+    var errors = [];
+    var processedCount = 0;
 
     allThreads.forEach(function(thread, threadIndex) {
       if (DEBUG) {
-        Logger.log('Processing thread ' + (threadIndex + 1) + '/' + allThreads.length + ': "' + thread.getFirstMessageSubject() + '"');
+        log_('INFO', 'fetchAndSaveWorkspaceInvoices', 'Processing thread ' + (threadIndex + 1) + '/' + allThreads.length + ': "' + thread.getFirstMessageSubject() + '"');
       }
 
-      const messages = thread.getMessages();
-      const latestMessage = messages[messages.length - 1];
-      const messageDate = latestMessage.getDate();
+      var messages = thread.getMessages();
+      var latestMessage = messages[messages.length - 1];
+      var messageDate = latestMessage.getDate();
 
       if (messageDate < ONE_YEAR_AGO) {
-        Logger.log('  Thread date ' + messageDate + ' is older than cutoff. Skipping.');
+        log_('INFO', 'fetchAndSaveWorkspaceInvoices', 'Thread date ' + messageDate + ' is older than cutoff. Skipping.');
         return;
       }
 
       messages.forEach(function(message, messageIndex) {
-        const senderEmail = extractEmailAddress_(message.getFrom());
+        var senderEmail = extractEmailAddress_(message.getFrom());
 
         if (senderEmail !== SENDER_EMAIL) {
           return;
         }
 
         try {
-          const body = message.getPlainBody();
-          const messageId = message.getId();
-          const invoiceNumber = extractInvoiceNumber_(body);
+          var body = message.getPlainBody();
+          var messageId = message.getId();
+          var invoiceNumber = extractInvoiceNumber_(body);
 
           if (invoiceNumber === 'N/A') {
-            Logger.log('    Invoice number not found in message ' + (messageIndex + 1) + '. Skipping.');
+            log_('INFO', 'fetchAndSaveWorkspaceInvoices', 'Invoice number not found in message ' + (messageIndex + 1) + '. Skipping.');
             return;
           }
 
           // Check duplicates against pre-loaded data AND newly collected rows
           if (isDuplicate_(existingData, newRows, invoiceNumber, messageId)) {
-            Logger.log('    Invoice ' + invoiceNumber + ' or Message ID ' + messageId + ' already exists. Skipping.');
+            log_('INFO', 'fetchAndSaveWorkspaceInvoices', 'Invoice ' + invoiceNumber + ' or Message ID ' + messageId + ' already exists. Skipping.');
             return;
           }
 
@@ -131,7 +256,7 @@ function fetchAndSaveWorkspaceInvoices() {
           var pdfText = extractTextFromPDF_(message);
           var amountFromPDF = amountFromBody !== 0 ? 0 : extractAmountFromText_(pdfText);
           var amount = amountFromBody !== 0 ? amountFromBody : amountFromPDF;
-          var currency = 'USD';
+          var currency = detectCurrency_(body) || detectCurrency_(pdfText) || DEFAULT_CURRENCY;
           var description = extractDescription_(body);
 
           // Save attachments to Drive
@@ -152,10 +277,10 @@ function fetchAndSaveWorkspaceInvoices() {
 
           newRows.push(row);
           processedCount++;
-          Logger.log('    Queued Invoice ' + invoiceNumber + ' for batch write.');
+          log_('INFO', 'fetchAndSaveWorkspaceInvoices', 'Queued Invoice ' + invoiceNumber + ' (' + currency + ' ' + amount + ') for batch write.');
 
         } catch (msgError) {
-          Logger.log('    Error processing message: ' + msgError);
+          log_('ERROR', 'fetchAndSaveWorkspaceInvoices', 'Error processing message: ' + msgError);
           errors.push('Invoice processing error: ' + msgError);
         }
       });
@@ -163,12 +288,17 @@ function fetchAndSaveWorkspaceInvoices() {
 
     // Best practice: batch write all new rows at once instead of appendRow in a loop
     if (newRows.length > 0) {
-      var lastRow = sheet.getLastRow();
-      sheet.getRange(lastRow + 1, 1, newRows.length, newRows[0].length).setValues(newRows);
-      Logger.log('Batch wrote ' + newRows.length + ' new invoice rows to the sheet.');
+      withRetry_('sheet.setValues', function() {
+        var lastRow = sheet.getLastRow();
+        sheet.getRange(lastRow + 1, 1, newRows.length, newRows[0].length).setValues(newRows);
+      });
+      log_('INFO', 'fetchAndSaveWorkspaceInvoices', 'Batch wrote ' + newRows.length + ' new invoice rows to the sheet.');
     }
 
-    Logger.log('Processing complete. ' + processedCount + ' new invoices added.');
+    log_('INFO', 'fetchAndSaveWorkspaceInvoices', 'Processing complete. ' + processedCount + ' new invoices added.');
+
+    // Flush logs to sheet before sending notification
+    flushLogs_(spreadsheet);
 
     // Send a single summary notification (not one per error)
     var notificationBody = 'Successfully processed ' + allThreads.length + ' invoice threads on ' + new Date() + '.\n' +
@@ -181,7 +311,13 @@ function fetchAndSaveWorkspaceInvoices() {
     sendNotification_(errors.length > 0 ? 'Completed with Errors' : 'Success', notificationBody);
 
   } catch (error) {
-    Logger.log('Critical error in fetchAndSaveWorkspaceInvoices: ' + error);
+    log_('ERROR', 'fetchAndSaveWorkspaceInvoices', 'Critical error: ' + error);
+
+    // Attempt to flush logs even on critical error
+    if (spreadsheet) {
+      flushLogs_(spreadsheet);
+    }
+
     sendNotification_('Critical Error', 'A critical error occurred:\n\n' + error);
   }
 }
@@ -221,7 +357,9 @@ function fetchAllThreads_(label) {
   var start = 0;
 
   while (true) {
-    var batch = label.getThreads(start, THREAD_BATCH_SIZE);
+    var batch = withRetry_('label.getThreads', function() {
+      return label.getThreads(start, THREAD_BATCH_SIZE);
+    });
     if (batch.length === 0) {
       break;
     }
@@ -249,7 +387,9 @@ function loadExistingData_(sheet) {
   }
 
   // Read both columns in a single batch read
-  var data = sheet.getRange(2, 1, lastRow - 1, 10).getValues();
+  var data = withRetry_('sheet.getValues', function() {
+    return sheet.getRange(2, 1, lastRow - 1, 10).getValues();
+  });
   var invoiceNumbers = data.map(function(row) { return row[0]; });
   var messageIds = data.map(function(row) { return row[9]; });
 
@@ -365,6 +505,46 @@ function extractDescription_(body) {
   return match && match[1] ? match[1].trim() : '';
 }
 
+/**
+ * Detects currency from text by looking for ISO codes and currency symbols.
+ * Checks for: (1) "Total in XXX" pattern, (2) ISO currency codes, (3) currency symbols.
+ * @param {string} text - The text to scan (email body or PDF text).
+ * @return {string|null} ISO 4217 currency code, or null if not detected.
+ */
+function detectCurrency_(text) {
+  if (!text) return null;
+
+  // Priority 1: "Total in XXX" pattern (strongest signal for Google invoices)
+  var totalInMatch = text.match(/Total\s+in\s+([A-Z]{3})/i);
+  if (totalInMatch && totalInMatch[1]) {
+    return totalInMatch[1].toUpperCase();
+  }
+
+  // Priority 2: Explicit ISO currency code near amount keywords
+  var codeNearAmount = text.match(/(?:Amount|Total|Balance|Due|Price)\s*[:\-]?\s*([A-Z]{3})\s*[\d,]/i);
+  if (codeNearAmount && codeNearAmount[1]) {
+    var code = codeNearAmount[1].toUpperCase();
+    if (CURRENCY_CODE_PATTERN.test(code)) {
+      return code;
+    }
+  }
+
+  // Priority 3: Any standalone ISO currency code in the text
+  var isoMatch = text.match(CURRENCY_CODE_PATTERN);
+  if (isoMatch && isoMatch[1]) {
+    return isoMatch[1].toUpperCase();
+  }
+
+  // Priority 4: Currency symbols
+  for (var symbol in CURRENCY_SYMBOLS) {
+    if (text.indexOf(symbol) !== -1) {
+      return CURRENCY_SYMBOLS[symbol];
+    }
+  }
+
+  return null;
+}
+
 // ==== Drive Functions ====
 
 /**
@@ -382,11 +562,13 @@ function saveAttachmentsToDrive_(message, folder) {
   attachments.forEach(function(attachment) {
     var mimeType = attachment.getContentType();
     if (SUPPORTED_MIME_TYPES.indexOf(mimeType) !== -1) {
-      var file = folder.createFile(attachment);
+      var file = withRetry_('folder.createFile', function() {
+        return folder.createFile(attachment);
+      });
       receiptLinks.push(file.getUrl());
-      Logger.log('        Saved attachment: ' + attachment.getName());
+      log_('INFO', 'saveAttachmentsToDrive_', 'Saved attachment: ' + attachment.getName());
     } else {
-      Logger.log('        Skipped unsupported attachment: ' + attachment.getName() + ' (' + mimeType + ')');
+      log_('INFO', 'saveAttachmentsToDrive_', 'Skipped unsupported attachment: ' + attachment.getName() + ' (' + mimeType + ')');
     }
   });
 
@@ -419,8 +601,12 @@ function extractTextFromPDF_(message) {
         mimeType: MimeType.GOOGLE_DOCS
       };
 
-      var docFile = Drive.Files.create(resource, tempFile.getBlob(), { convert: true });
-      var doc = DocumentApp.openById(docFile.id);
+      var docFile = withRetry_('Drive.Files.create', function() {
+        return Drive.Files.create(resource, tempFile.getBlob(), { convert: true });
+      });
+      var doc = withRetry_('DocumentApp.openById', function() {
+        return DocumentApp.openById(docFile.id);
+      });
       var text = doc.getBody().getText();
 
       extractedText += text + '\n';
@@ -429,7 +615,7 @@ function extractTextFromPDF_(message) {
       tempFile.setTrashed(true);
       DriveApp.getFileById(docFile.id).setTrashed(true);
     } catch (pdfError) {
-      Logger.log('        Error extracting text from PDF: ' + pdfError);
+      log_('ERROR', 'extractTextFromPDF_', 'Error extracting text from PDF: ' + pdfError);
     }
   });
 
@@ -456,8 +642,8 @@ function getOrCreateTempFolder_() {
  */
 function listAllLabels_() {
   var labels = GmailApp.getUserLabels();
-  Logger.log('Listing all Gmail labels:');
+  log_('INFO', 'listAllLabels_', 'Listing all Gmail labels:');
   labels.forEach(function(label) {
-    Logger.log('- ' + label.getName());
+    log_('INFO', 'listAllLabels_', '- ' + label.getName());
   });
 }
