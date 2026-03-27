@@ -1,0 +1,10 @@
+# Ignore everything except Apps Script files
+README.md
+LICENSE
+CLAUDE.md
+.git/**
+.gitignore
+.eslintrc.json
+.claspignore
+.clasp.json.example
+node_modules/**
