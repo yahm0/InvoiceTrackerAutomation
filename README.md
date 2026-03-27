@@ -127,4 +127,4 @@ Contributions are welcome! If you have any suggestions or improvements, feel fre
 
 ## Contact
 
-For questions or support, please open an issue on the repository or contact the repository owner.
+For questions or support, please open an issue on the repository.
