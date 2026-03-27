@@ -19,3 +19,7 @@ node_modules/
 # Environment
 .env
 .env.local
+
+# Claude Code
+CLAUDE.md
+.claude/
