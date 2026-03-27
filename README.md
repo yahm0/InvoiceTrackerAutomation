@@ -1,6 +1,6 @@
 # InvoiceTrackerAutomation
 
-**InvoiceTrackerAutomation** is a Google Apps Script that automatically retrieves, extracts, and logs invoice emails from Gmail into a Google Sheet, with attachments saved to Google Drive. It supports invoices from any sender — Google Workspace, Stripe, AWS, Notion, or any other vendor — and centralizes invoice management to eliminate manual data entry.
+**InvoiceTrackerAutomation** is a Google Apps Script that automatically retrieves, extracts, and logs invoice emails from Gmail into a Google Sheet, with attachments saved to Google Drive. It supports invoices from any sender  - Google Workspace, Stripe, AWS, Notion, or any other vendor  - and centralizes invoice management to eliminate manual data entry.
 
 ## Features
 
@@ -51,11 +51,11 @@ Required only if you want OCR on scanned image PDFs. Skip this section if you on
 
 1. **Link your Apps Script project to a GCP project:** Apps Script Editor → Project Settings → Google Cloud Platform (GCP) Project → Change project. Enter your GCP project number.
 2. **Enable Cloud Vision API:** GCP Console → APIs & Services → Library → search "Cloud Vision API" → Enable.
-3. **Enable billing** on the GCP project (free tier: 1,000 pages/month — sufficient for most invoice workflows).
+3. **Enable billing** on the GCP project (free tier: 1,000 pages/month  - sufficient for most invoice workflows).
 4. **Set config values in the script:**
    - `ENABLE_VISION_OCR = true`
    - `CLOUD_PROJECT_NUMBER = 'your-numeric-project-number'`
-5. **Re-authorize the script** — the next run will prompt for the new `cloud-vision` scope.
+5. **Re-authorize the script**  - the next run will prompt for the new `cloud-vision` scope.
 
 > No service account or API key required. The script uses the authorized user's OAuth token.
 
@@ -130,7 +130,7 @@ The script scans Gmail for emails with the label specified in **LABEL_NAME**, op
 - **Sheet Not Found:** Sends an error notification if the specified sheet cannot be found.
 - **Duplicate Entries:** Checks for duplicate invoice numbers and message IDs to prevent reprocessing.
 - **PDF Extraction Issues:** Logs any issues related to PDF text extraction; processing continues.
-- **Vision OCR Failure:** If Vision API returns an error, the script falls back to the Drive conversion result and logs a warning — processing continues.
+- **Vision OCR Failure:** If Vision API returns an error, the script falls back to the Drive conversion result and logs a warning  - processing continues.
 - **Error Summary:** All errors during a run are collected and sent in a single notification email.
 - **Persistent Logs:** All log entries are written to a "Logs" sheet for post-run analysis and audit trails.
 
@@ -170,14 +170,14 @@ Common operational tasks for maintaining and extending the script.
 1. Clear all rows **below the header row** in the Invoice Tracker sheet (keep row 1).
 2. Clear all rows **below the header row** in the Logs sheet (keep row 1).
 3. Re-run `fetchAndSaveWorkspaceInvoices()`.
-4. Duplicate detection uses Message ID — no duplicates will appear as long as the same emails are in Gmail.
+4. Duplicate detection uses Message ID  - no duplicates will appear as long as the same emails are in Gmail.
 
 ---
 
 ### Runbook 3: Script Fails with "Configuration incomplete"
 
 1. Open the script in Apps Script editor.
-2. Check `SPREADSHEET_ID`, `FOLDER_ID`, `RECIPIENT_EMAIL` — replace all `YOUR_*` placeholders with real values.
+2. Check `SPREADSHEET_ID`, `FOLDER_ID`, `RECIPIENT_EMAIL`  - replace all `YOUR_*` placeholders with real values.
 3. If `ENABLE_VISION_OCR = true`, also check `CLOUD_PROJECT_NUMBER`.
 4. Save and re-run.
 
@@ -188,7 +188,7 @@ Common operational tasks for maintaining and extending the script.
 1. Set `ENABLE_VISION_OCR = true` in the config.
 2. Set `CLOUD_PROJECT_NUMBER = 'your-numeric-project-number'`.
 3. Follow the **Vision API Setup** steps in this README.
-4. Re-run — check the Logs sheet for `extractTextViaVision_` entries to confirm it fired.
+4. Re-run  - check the Logs sheet for `extractTextViaVision_` entries to confirm it fired.
 
 ---
 
@@ -200,7 +200,7 @@ Common operational tasks for maintaining and extending the script.
    ```javascript
    /Your\s*Total\s*[:\-]?\s*\$?([\d,]+\.\d{2})/i
    ```
-4. Delete the affected row from the sheet and re-run — the script will re-extract with the new pattern.
+4. Delete the affected row from the sheet and re-run  - the script will re-extract with the new pattern.
 
 ---
 
@@ -209,7 +209,7 @@ Common operational tasks for maintaining and extending the script.
 1. In Apps Script editor: click the **Triggers** icon (clock) → **Add Trigger**.
 2. Function: `fetchAndSaveWorkspaceInvoices` | Event source: **Time-driven** | Type: **Day timer**.
 3. Choose a time window (e.g., 6am–7am).
-4. Save — the script runs automatically each day and sends you a summary email.
+4. Save  - the script runs automatically each day and sends you a summary email.
 
 ---
 
@@ -217,7 +217,7 @@ Common operational tasks for maintaining and extending the script.
 
 1. In the Invoice Tracker sheet, sort by Column A (Invoice Number) to surface duplicates.
 2. Delete the extra rows manually, keeping one row per invoice.
-3. The next run will not re-add them — duplicate detection checks both Invoice Number and Message ID.
+3. The next run will not re-add them  - duplicate detection checks both Invoice Number and Message ID.
 
 ---
 
@@ -226,7 +226,7 @@ Common operational tasks for maintaining and extending the script.
 1. Create the new label in Gmail if it doesn't exist.
 2. Set up a Gmail filter to apply the new label to incoming invoice emails.
 3. Update `LABEL_NAME` in the script to the new label name.
-4. Save and run — only emails with the new label will be processed going forward.
+4. Save and run  - only emails with the new label will be processed going forward.
 5. Old processed invoices stay in the sheet and are not removed.
 
 ---
@@ -234,9 +234,9 @@ Common operational tasks for maintaining and extending the script.
 ### Runbook 9: Vision OCR Returns Garbled or Empty Text
 
 1. Open the Logs sheet and filter by **Function** = `extractTextViaVision_`.
-2. **HTTP 403:** Vision API is not enabled in GCP, or the script is not linked to the correct project — re-check the Vision API Setup section.
-3. **HTTP 429:** Free-tier quota exceeded (1,000 pages/month) — set `ENABLE_VISION_OCR = false` temporarily or upgrade billing.
-4. **Text returned but amount is 0:** The scanned PDF has an unusual amount format — follow Runbook 5 to add a new pattern.
+2. **HTTP 403:** Vision API is not enabled in GCP, or the script is not linked to the correct project  - re-check the Vision API Setup section.
+3. **HTTP 429:** Free-tier quota exceeded (1,000 pages/month)  - set `ENABLE_VISION_OCR = false` temporarily or upgrade billing.
+4. **Text returned but amount is 0:** The scanned PDF has an unusual amount format  - follow Runbook 5 to add a new pattern.
 
 ---
 
@@ -252,7 +252,7 @@ Common operational tasks for maintaining and extending the script.
 
 1. Open the Drive folder specified in `FOLDER_ID`.
 2. Sort by **Last modified** and archive or delete old attachments that are no longer needed.
-3. Alternatively, create a new Drive folder, update `FOLDER_ID`, and re-run — new attachments go to the new folder, old sheet rows retain their original Drive links.
+3. Alternatively, create a new Drive folder, update `FOLDER_ID`, and re-run  - new attachments go to the new folder, old sheet rows retain their original Drive links.
 
 ---
 
