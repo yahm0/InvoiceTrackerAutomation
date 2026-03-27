@@ -4,7 +4,10 @@ const SPREADSHEET_ID = 'YOUR_SPREADSHEET_ID_HERE';
 const SHEET_NAME = 'Workspace Invoices Tracker';
 const LABEL_NAME = 'Workspace Invoices';
 const FOLDER_ID = 'YOUR_GOOGLE_DRIVE_FOLDER_ID_HERE';
-const SENDER_EMAIL = 'payments-noreply@google.com';
+// Allowed sender email addresses. Add any invoice senders you want to process.
+// Leave empty [] to accept invoices from ANY sender that has the Gmail label applied.
+// Example: ['payments-noreply@google.com', 'billing@stripe.com', 'invoices@aws.amazon.com']
+const SENDER_EMAILS = ['payments-noreply@google.com'];
 const RECIPIENT_EMAIL = 'YOUR_EMAIL_ADDRESS_HERE';
 
 // Date range: only process emails from the last year
@@ -166,7 +169,7 @@ function getOrCreateLogSheet_(spreadsheet) {
 // ==== Main Function ====
 
 /**
- * Fetches Google Workspace invoices from Gmail, extracts data,
+ * Fetches invoice emails from Gmail (any sender), extracts data,
  * saves attachments to Drive, and logs everything to a Google Sheet.
  */
 function fetchAndSaveWorkspaceInvoices() {
@@ -244,7 +247,9 @@ function fetchAndSaveWorkspaceInvoices() {
       messages.forEach(function(message, messageIndex) {
         var senderEmail = extractEmailAddress_(message.getFrom());
 
-        if (senderEmail !== SENDER_EMAIL) {
+        // If SENDER_EMAILS is non-empty, only process messages from listed senders.
+        // If SENDER_EMAILS is empty [], process all senders that have the label applied.
+        if (SENDER_EMAILS.length > 0 && SENDER_EMAILS.indexOf(senderEmail) === -1) {
           return;
         }
 
@@ -264,7 +269,7 @@ function fetchAndSaveWorkspaceInvoices() {
             return;
           }
 
-          var paymentsProfileId = extractPaymentsProfileId_(body);
+          var vendorRef = extractVendorRef_(body);
           var service = extractService_(body);
           var amountFromBody = extractAmountFromText_(body);
           var pdfText = extractTextFromPDF_(message);
@@ -279,7 +284,7 @@ function fetchAndSaveWorkspaceInvoices() {
           var row = [
             invoiceNumber,
             message.getDate(),
-            paymentsProfileId,
+            vendorRef,
             service,
             amount,
             currency,
@@ -449,7 +454,7 @@ function isDuplicate_(existingData, newRows, invoiceNumber, messageId) {
 function sendNotification_(type, body) {
   MailApp.sendEmail({
     to: RECIPIENT_EMAIL,
-    subject: 'Workspace Invoices Automation - ' + type,
+    subject: 'Invoice Tracker Automation - ' + type,
     body: body
   });
 }
@@ -477,13 +482,23 @@ function extractInvoiceNumber_(body) {
 }
 
 /**
- * Extracts payments profile ID from email body text.
+ * Extracts a vendor reference ID from email body text.
+ * Tries multiple patterns to support Google Workspace, AWS, Stripe, and generic invoices.
  * @param {string} body - The email body text.
- * @return {string} The payments profile ID or 'N/A' if not found.
+ * @return {string} The vendor reference ID or 'N/A' if not found.
  */
-function extractPaymentsProfileId_(body) {
-  var match = body.match(/Payments\s*profile\s*ID\s*[:\-]?\s*([\d\-]+)/i);
-  return match && match[1] ? match[1] : 'N/A';
+function extractVendorRef_(body) {
+  var patterns = [
+    /Payments\s*profile\s*ID\s*[:\-]?\s*([\d\-]+)/i,          // Google Workspace
+    /Account\s*(?:ID|number|#)\s*[:\-]?\s*([\w\-]+)/i,        // AWS / generic
+    /Customer\s*(?:ID|number|#)\s*[:\-]?\s*([\w\-]+)/i,       // Stripe / SaaS
+    /Billing\s*(?:ID|reference)\s*[:\-]?\s*([\w\-]+)/i        // Generic billing
+  ];
+  for (var i = 0; i < patterns.length; i++) {
+    var match = body.match(patterns[i]);
+    if (match && match[1]) return match[1];
+  }
+  return 'N/A';
 }
 
 /**
