@@ -19,6 +19,20 @@ const THREAD_BATCH_SIZE = 100;
 // Maximum retry attempts for transient API errors
 const MAX_RETRIES = 3;
 
+// ==== Vision OCR Configuration (Optional) ====
+// To enable: set ENABLE_VISION_OCR = true and fill in CLOUD_PROJECT_NUMBER.
+// When false, the script works exactly as before — zero Vision API calls are made.
+// See README for GCP setup instructions.
+const ENABLE_VISION_OCR = false;
+
+// Minimum characters from Drive PDF conversion before attempting Vision OCR fallback.
+// Text-based PDFs produce hundreds of chars; scanned PDFs return near-zero.
+const OCR_MIN_TEXT_LENGTH = 50;
+
+// Your GCP project number (numeric string, e.g. '123456789012').
+// Found in GCP Console > Project Info card. Only required when ENABLE_VISION_OCR = true.
+const CLOUD_PROJECT_NUMBER = 'YOUR_CLOUD_PROJECT_NUMBER_HERE';
+
 // Logging configuration
 const LOG_SHEET_NAME = 'Logs';
 const MAX_LOG_ENTRIES = 1000;
@@ -335,6 +349,11 @@ function validateConfig_() {
     RECIPIENT_EMAIL: RECIPIENT_EMAIL
   };
 
+  // Only validate Vision config when it is enabled
+  if (ENABLE_VISION_OCR) {
+    placeholders.CLOUD_PROJECT_NUMBER = CLOUD_PROJECT_NUMBER;
+  }
+
   var missing = [];
   for (var key in placeholders) {
     if (placeholders[key].indexOf('YOUR_') === 0) {
@@ -545,6 +564,67 @@ function detectCurrency_(text) {
   return null;
 }
 
+// ==== Vision OCR (Optional) ====
+// These two functions are the entire Vision integration.
+// They are only called when ENABLE_VISION_OCR = true in the config above.
+// Set ENABLE_VISION_OCR = false to bypass them completely with zero side effects.
+
+/**
+ * Returns true if the Drive-extracted text is too short to trust,
+ * indicating the PDF is likely a scanned image that needs Vision OCR.
+ * @param {string} text - Text extracted by Drive PDF conversion.
+ * @return {boolean} True if Vision OCR fallback should be attempted.
+ */
+function isScannedPDF_(text) {
+  return !text || text.trim().length < OCR_MIN_TEXT_LENGTH;
+}
+
+/**
+ * Calls Cloud Vision API DOCUMENT_TEXT_DETECTION on a PDF blob.
+ * Sends the PDF as inline base64 — no GCS bucket or service account required.
+ * Handles up to 5 pages per PDF (Vision inline limit). Synchronous.
+ * @param {Blob} pdfBlob - The PDF blob to OCR.
+ * @return {string} Extracted text from all pages, or empty string on any failure.
+ */
+function extractTextViaVision_(pdfBlob) {
+  try {
+    var b64 = Utilities.base64Encode(pdfBlob.getBytes());
+    var requestBody = {
+      requests: [{
+        inputConfig: { content: b64, mimeType: 'application/pdf' },
+        features: [{ type: 'DOCUMENT_TEXT_DETECTION' }]
+      }]
+    };
+
+    var response = UrlFetchApp.fetch('https://vision.googleapis.com/v1/files:annotate', {
+      method: 'post',
+      contentType: 'application/json',
+      headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+      payload: JSON.stringify(requestBody),
+      muteHttpExceptions: true
+    });
+
+    if (response.getResponseCode() !== 200) {
+      log_('WARN', 'extractTextViaVision_',
+        'Vision API HTTP ' + response.getResponseCode() + ': ' + response.getContentText());
+      return '';
+    }
+
+    var result = JSON.parse(response.getContentText());
+    var pages = result.responses && result.responses[0] && result.responses[0].responses;
+    if (!pages) return '';
+
+    // Concatenate fullTextAnnotation.text from each page
+    return pages.map(function(page) {
+      return page.fullTextAnnotation ? page.fullTextAnnotation.text : '';
+    }).join('\n').trim();
+
+  } catch (visionError) {
+    log_('ERROR', 'extractTextViaVision_', 'Vision OCR failed: ' + visionError);
+    return '';
+  }
+}
+
 // ==== Drive Functions ====
 
 /**
@@ -593,6 +673,9 @@ function extractTextFromPDF_(message) {
   attachments.forEach(function(attachment) {
     if (attachment.getContentType() !== 'application/pdf') return;
 
+    // Per-attachment text, captured separately so Vision fallback can compare lengths
+    var attachmentText = '';
+
     try {
       var tempFile = tempFolder.createFile(attachment);
 
@@ -607,16 +690,30 @@ function extractTextFromPDF_(message) {
       var doc = withRetry_('DocumentApp.openById', function() {
         return DocumentApp.openById(docFile.id);
       });
-      var text = doc.getBody().getText();
-
-      extractedText += text + '\n';
+      attachmentText = doc.getBody().getText();
 
       // Clean up temporary files
       tempFile.setTrashed(true);
       DriveApp.getFileById(docFile.id).setTrashed(true);
     } catch (pdfError) {
-      log_('ERROR', 'extractTextFromPDF_', 'Error extracting text from PDF: ' + pdfError);
+      log_('ERROR', 'extractTextFromPDF_', 'Drive conversion error: ' + pdfError);
     }
+
+    // Vision OCR fallback — only runs when ENABLE_VISION_OCR = true
+    // and Drive conversion returned suspiciously little text (scanned PDF signal)
+    if (ENABLE_VISION_OCR && isScannedPDF_(attachmentText)) {
+      log_('INFO', 'extractTextFromPDF_',
+        'Drive returned ' + attachmentText.trim().length + ' chars for "' +
+        attachment.getName() + '". Trying Vision OCR.');
+      var visionText = extractTextViaVision_(attachment.copyBlob());
+      if (visionText && visionText.trim().length > attachmentText.trim().length) {
+        attachmentText = visionText;
+        log_('INFO', 'extractTextFromPDF_',
+          'Vision OCR extracted ' + visionText.trim().length + ' chars from "' + attachment.getName() + '".');
+      }
+    }
+
+    extractedText += attachmentText + '\n';
   });
 
   return extractedText.trim();
