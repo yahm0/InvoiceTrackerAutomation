@@ -1,0 +1,38 @@
+{
+  "env": {
+    "es6": true
+  },
+  "parserOptions": {
+    "ecmaVersion": 2020
+  },
+  "globals": {
+    "Logger": "readonly",
+    "SpreadsheetApp": "readonly",
+    "GmailApp": "readonly",
+    "DriveApp": "readonly",
+    "Drive": "readonly",
+    "DocumentApp": "readonly",
+    "MailApp": "readonly",
+    "UrlFetchApp": "readonly",
+    "Utilities": "readonly",
+    "ScriptApp": "readonly",
+    "PropertiesService": "readonly",
+    "MimeType": "readonly",
+    "console": "readonly"
+  },
+  "rules": {
+    "no-unused-vars": ["warn", { "varsIgnorePattern": "^(fetchAndSaveWorkspaceInvoices|installTrigger|removeTrigger|listAllLabels|validateConfig_)$" }],
+    "no-undef": "error",
+    "no-redeclare": "error",
+    "eqeqeq": ["error", "always"],
+    "no-eval": "error",
+    "no-implied-eval": "error",
+    "no-new-func": "error",
+    "prefer-const": "warn",
+    "no-var": "off",
+    "semi": ["warn", "always"],
+    "no-throw-literal": "error",
+    "no-unreachable": "error",
+    "no-constant-condition": ["error", { "checkLoops": false }]
+  }
+}
