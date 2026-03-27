@@ -1,0 +1,21 @@
+# clasp
+.clasp.json
+.clasprc.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Node (if using clasp locally)
+node_modules/
+
+# Environment
+.env
+.env.local

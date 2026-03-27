@@ -11,13 +11,22 @@
 - **PDF Text Extraction:** Converts attached PDFs to Google Docs for extracting relevant text information.
 - **Notification System:** Sends email notifications for success or error scenarios.
 - **Duplicate Check:** Ensures that duplicate invoices are not logged in the Google Sheet.
+- **Batch Operations:** Collects all new rows and writes them in a single batch for performance.
+- **Thread Pagination:** Handles mailboxes with more than 500 threads via paginated fetching.
+- **Configuration Validation:** Validates that all required settings are configured before running.
 
 ## Recent Changes
 
-- **Enhanced PDF Amount Extraction:** Improved regex patterns to better handle line breaks and extract amounts from PDFs more reliably.
-- **Duplicate Detection:** Added a check for duplicate invoice numbers and message IDs to prevent reprocessing already logged invoices.
-- **Detailed Logging Enhancements:** Comprehensive logs were added to trace the entire processing workflow, from Gmail retrieval to data extraction and Google Sheet updates.
-- **CMS Article ID Tracking:** Added a new column in Google Sheets to store the unique Message ID, ensuring accurate tracking and preventing duplicate entries.
+- **Best Practices Refactor:** Rewrote script following Google Apps Script best practices (batch reads/writes, minimized service calls in loops, JSDoc documentation).
+- **Batch Sheet Writes:** Replaced per-row `appendRow()` with a single `setValues()` batch write for significantly improved performance.
+- **Single-Read Duplicate Check:** Invoice numbers and message IDs are loaded once before processing, eliminating redundant sheet reads per message.
+- **Unified Amount Extraction:** Merged duplicate `extractAmount()` and `extractAmountFromPDF()` into a single `extractAmountFromText_()` function.
+- **Thread Pagination:** Added paginated thread fetching to handle mailboxes with more than 500 invoice threads.
+- **Config Validation:** Script validates configuration values on startup and throws a clear error if placeholders remain.
+- **Debug Mode:** Added a `DEBUG` flag to toggle verbose logging and label listing (off by default).
+- **Error Batching:** Errors are collected and sent in a single summary notification instead of one email per error.
+- **Project Manifest:** Added `appsscript.json` with proper OAuth scopes and Drive API v3 dependency.
+- **Private Functions:** Helper functions use trailing underscore convention (`functionName_()`) per Google Apps Script standards.
 
 ## Setup Instructions
 
@@ -29,15 +38,16 @@
 
 ### Configuration
 
-1. **Copy the Script:** Copy the provided code into the Google Apps Script Editor.
-2. **Replace Configuration Variables:**
+1. **Copy the Script:** Copy `fetchAndSaveWorkspaceInvoices.gs` into the Google Apps Script Editor.
+2. **Copy the Manifest:** Replace the default `appsscript.json` with the one from this repository (or manually enable Drive API v3 in Services).
+3. **Replace Configuration Variables:**
    - **SPREADSHEET_ID:** Replace with the ID of your Google Sheet where invoice details will be stored.
    - **SHEET_NAME:** Replace with the name of the specific sheet where data should be saved.
    - **LABEL_NAME:** Replace with the label used in Gmail for Workspace invoices.
    - **FOLDER_ID:** Replace with the Google Drive folder ID where attachments will be stored.
    - **SENDER_EMAIL:** Replace with the email address of the sender of invoices (e.g., payments-noreply@google.com).
    - **RECIPIENT_EMAIL:** Replace with your email address to receive error/success notifications.
-3. **Enable Advanced Google Services:**
+4. **Enable Advanced Google Services:**
    - Navigate to `Extensions > Apps Script > Services > Enable Drive API`.
 
 ### Running the Script
@@ -48,6 +58,10 @@
 ### Automation
 
 - Set up a time-based trigger (e.g., daily or weekly) to run the script automatically and keep your records updated.
+
+### Debug Mode
+
+Set `DEBUG = true` in the configuration section to enable verbose logging and Gmail label listing. This is useful for initial setup and troubleshooting.
 
 ## Usage
 
@@ -60,18 +74,48 @@ The script automatically scans Gmail for invoices based on the label specified i
 3. **Attachment Saved:** Attachments (like receipts or PDFs) are saved to Google Drive.
 4. **Notification:** A success or error notification is sent to the configured recipient.
 
+### Google Sheet Columns
+
+| Column | Header | Description |
+|--------|--------|-------------|
+| A | Invoice Number | Extracted invoice number |
+| B | Date | Message date |
+| C | Payments Profile ID | Billing profile identifier |
+| D | Service | Service description |
+| E | Amount | Invoice amount |
+| F | Currency | Currency type (USD) |
+| G | Description | Invoice description |
+| H | Receipt Link | Google Drive file URL(s) |
+| I | PDF Text | Extracted text from PDF attachments |
+| J | Message ID | Unique Gmail message ID |
+
 ## Error Handling
 
+- **Configuration Validation:** Throws a clear error if required config values are still set to placeholders.
 - **Label Not Found:** Sends an error notification if the Gmail label does not exist.
 - **Sheet Not Found:** Sends an error notification if the specified sheet cannot be found in the Google Spreadsheet.
 - **Duplicate Entries:** Checks for duplicate invoice numbers and message IDs to prevent reprocessing.
-- **PDF Extraction Issues:** Logs any issues related to PDF text extraction and sends notifications for critical errors.
+- **PDF Extraction Issues:** Logs any issues related to PDF text extraction.
+- **Error Summary:** All errors during processing are collected and sent in a single notification email.
+
+## Project Structure
+
+```
+InvoiceTrackerAutomation/
+├── fetchAndSaveWorkspaceInvoices.gs   # Main Google Apps Script
+├── appsscript.json                     # Project manifest (scopes, services, runtime)
+├── .gitignore                          # Git ignore rules
+├── LICENSE                             # MIT License
+└── README.md                           # This file
+```
 
 ## Future Enhancements
 
 - **Improved OCR:** Integrate Google Cloud Vision API for improved OCR capabilities on scanned PDF invoices.
 - **Enhanced Error Handling:** Add retry logic for transient errors.
 - **Logging Enhancements:** Store logs in Google Sheets for better tracking of processed invoices.
+- **Currency Detection:** Auto-detect currency from invoice content instead of hardcoding USD.
+- **clasp Integration:** Add `.clasp.json` configuration for local development and CI/CD deployment.
 
 ## License
 
@@ -84,4 +128,3 @@ Contributions are welcome! If you have any suggestions or improvements, feel fre
 ## Contact
 
 For questions or support, please open an issue on the repository or contact the repository owner.
-
